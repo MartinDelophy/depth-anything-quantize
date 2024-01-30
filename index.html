@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Document</title>
+    <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
+  </head>
+  <body>
+    <input type="file" id="file" onclick="uploadfile()" />
+    <script>
+      const preprocess = (input_imageData, width, height) => {
+        var floatArr = new Float32Array(width * height * 3);
+        var floatArr1 = new Float32Array(width * height * 3);
+        var floatArr2 = new Float32Array(width * height * 3);
+
+        var j = 0;
+        for (let i = 1; i < input_imageData.data.length + 1; i++) {
+          if (i % 4 != 0) {
+            floatArr[j] = input_imageData.data[i - 1].toFixed(2) / 255; // red   color
+            j = j + 1;
+          }
+        }
+        for (let i = 1; i < floatArr.length + 1; i += 3) {
+          floatArr1[i - 1] = floatArr[i - 1]; // red   color
+          floatArr1[i] = floatArr[i]; // green color
+          floatArr1[i + 1] = floatArr[i + 1]; // blue  color
+          //   floatArr1[i - 1] = (floatArr[i - 1] - 0.485) / 0.229; // red   color
+          //   floatArr1[i] = (floatArr[i] - 0.456) / 0.224; // green color
+          //   floatArr1[i + 1] = (floatArr[i + 1] - 0.406) / 0.225; // blue  color
+        }
+        var k = 0;
+        for (let i = 0; i < floatArr.length; i += 3) {
+          floatArr2[k] = floatArr[i]; // red   color
+          k = k + 1;
+        }
+        var l = k;
+        for (let i = 1; i < floatArr.length; i += 3) {
+          floatArr2[l] = floatArr[i]; // red   color
+          l = l + 1;
+        }
+
+        var m = l;
+        for (let i = 2; i < floatArr.length; i += 3) {
+          floatArr2[m] = floatArr[i]; // red   color
+          m = m + 1;
+        }
+        return floatArr2;
+      };
+
+      const postprocess = (tensor) => {
+        if (tensor.dims.length !== 4) {
+          console.error("Invalid tensor dimensions for image conversion.");
+          return null;
+        }
+
+        const channels = tensor.dims[1]; // 通道数
+        const height = tensor.dims[2];
+        const width = tensor.dims[3];
+
+        const imageData = new ImageData(width, height);
+        const data = imageData.data;
+
+        // 数据类型可能需要根据实际情况调整
+        const scale = 255.0;
+        const tensorData = new Float32Array(tensor.data.buffer);
+        let max_depth = 0;
+        let min_depth = 999;
+        for (let h = 0; h < height; h++) {
+          for (let w = 0; w < width; w++) {
+            for (let c = 0; c < channels; c++) {
+              const tensorIndex = (c * height + h) * width + w;
+
+              const dataIndex = (h * width + w) * 4 + c;
+
+              if (tensorData[tensorIndex] > max_depth) {
+                max_depth = tensorData[tensorIndex];
+              }
+              if (tensorData[tensorIndex] < min_depth) {
+                min_depth = tensorData[tensorIndex];
+              }
+            }
+          }
+        }
+
+        for (let h = 0; h < height; h++) {
+          for (let w = 0; w < width; w++) {
+            for (let c = 0; c < channels; c++) {
+              const tensorIndex = (c * height + h) * width + w;
+
+              const dataIndex = (h * width + w) * 4 + c;
+
+              // 假设数据类型为float32，根据实际情况调整
+              const value = tensorData[tensorIndex];
+              // const max_depth = 20;
+              // const min_depth = 0;
+              const depth =
+                ((value - min_depth) / (max_depth - min_depth)) * 255;
+
+              // 将值映射到ImageData中的对应通道
+              data[dataIndex] = Math.round(depth);
+              data[dataIndex + 1] = Math.round(depth);
+              data[dataIndex + 2] = Math.round(depth);
+            }
+            // 设置alpha通道为255，不透明
+            data[(h * width + w) * 4 + 3] = 255;
+          }
+        }
+        return imageData;
+      };
+      const uploadfile = () => {
+        const file = document.getElementById("file");
+        file.addEventListener("change", function () {
+          const file = this.files[0];
+          const reader = new FileReader();
+          reader.readAsDataURL(file);
+          reader.onload = function () {
+            const img = new Image();
+            img.src = this.result;
+              runMyModel(this.result);
+          };
+        });
+      }
+      async function runMyModel(src) {
+        // create a session
+        const myOrtSession = await ort.InferenceSession.create(
+          "./models/depth_anything_vits14.quant.onnx"
+        );
+        const image = new Image();
+        image.src = src;
+        image.onload = async function () {
+          let canvas = document.createElement("canvas");
+          const size = 512;
+          canvas.width = size;
+          canvas.height = size;
+          let ctx = canvas.getContext("2d");
+          ctx.drawImage(image, 0, 0, size, size);
+          document.body.appendChild(canvas);
+          const input_img = ctx.getImageData(0, 0, size, size);
+          // 将图片转换为tensor 4维转换为3维
+          const handled_imgArr = [];
+          for (let i = 0; i < input_img.data.length; i += 4) {
+            handled_imgArr.push(input_img.data[i] / 255);
+            handled_imgArr.push(input_img.data[i + 1] / 255);
+            handled_imgArr.push(input_img.data[i + 2] / 255);
+          }
+          const test = preprocess(input_img, size, size);
+          const input = new ort.Tensor(new Float32Array(test), [
+            1,
+            3,
+            size,
+            size,
+          ]);
+          const downsample_ratio = new ort.Tensor(new Float32Array([1]));
+          const result = await myOrtSession.run({
+            ["image"]: input,
+          });
+          const output = result["depth"];
+          const imgdata = postprocess(output, size, size);
+          canvas = document.createElement("canvas");
+          ctx = canvas.getContext("2d");
+          canvas.width = output.dims[3];
+          canvas.height = output.dims[2];
+          ctx.putImageData(imgdata, 0, 0);
+          document.body.appendChild(canvas);
+        //   const a = document.createElement("a");
+        //   a.href = canvas.toDataURL();
+        //   a.download = "result.png";
+        //   a.click();
+        };
+
+      }
+      runMyModel();
+    </script>
+  </body>
+</html>
