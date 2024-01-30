@@ -4,10 +4,11 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Document</title>
-    <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
+    <script src="./ort.min.js"></script>
   </head>
   <body>
     <input type="file" id="file" onclick="uploadfile()" />
+    <div id="loading"></div>
     <script>
       const preprocess = (input_imageData, width, height) => {
         var floatArr = new Float32Array(width * height * 3);
@@ -115,12 +116,14 @@
           const reader = new FileReader();
           reader.readAsDataURL(file);
           reader.onload = function () {
+            const loadingContainer = document.getElementById("loading");
+            loadingContainer.innerHTML = "模型处理中...";
             const img = new Image();
             img.src = this.result;
-              runMyModel(this.result);
+            runMyModel(this.result);
           };
         });
-      }
+      };
       async function runMyModel(src) {
         // create a session
         const myOrtSession = await ort.InferenceSession.create(
@@ -163,12 +166,13 @@
           canvas.height = output.dims[2];
           ctx.putImageData(imgdata, 0, 0);
           document.body.appendChild(canvas);
-        //   const a = document.createElement("a");
-        //   a.href = canvas.toDataURL();
-        //   a.download = "result.png";
-        //   a.click();
+          const loadingContainer = document.getElementById("loading");
+          loadingContainer.innerHTML = "";
+          //   const a = document.createElement("a");
+          //   a.href = canvas.toDataURL();
+          //   a.download = "result.png";
+          //   a.click();
         };
-
       }
       runMyModel();
     </script>
